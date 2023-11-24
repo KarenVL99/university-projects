@@ -1,0 +1,1038 @@
+---
+output:
+    pdf_document:
+        latex_engine: xelatex
+        number_sections: true
+header includes:
+  - \usepackage[T1]{fontenc}
+  - \usepackage[utf8]{inputenc}
+  - \usepackage{amsmath}
+  - \usepackage{amssymb}
+  - \usepackage{amsthm}
+  - \usepackage{amsfonts}
+  - \usepackage{multirow}
+  - \usepackage{booktabs}
+  - \usepackage{graphicx}
+  - \usepackage{xcolor}
+  - \usepackage{listings} 
+  - \usepackage{setspace}
+  - \setlength{\parindent}{0in}
+  - \usepackage{float}
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy} 
+  - \fancyhf{}
+  - \usepackage{xspace}
+  - \usepackage{natbib}
+  - \usepackage{longtable}
+  - \usepackage{rotating}
+
+---
+
+\begin{titlepage}
+\centering
+
+\begin{figure}[t]
+    \raggedright
+    \includegraphics[width=0.178\textwidth]{unam.jpg}~~~~~~~~~~~~~~~~~~~~~~~~~
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    \raggedleft
+    \includegraphics[width=0.185\textwidth]{fac.jpg}
+\end{figure}
+
+{\bfseries\LARGE Universidad Nacional \par}
+{\bfseries\LARGE Aut\'onoma de M\'exico \par}
+
+
+
+\vspace{1cm}
+{\scshape\Large Facultad de Ciencias \par}
+\vspace{3cm}
+\rule{14cm}{0.1mm}\par
+{\scshape\Huge Precios del Caf\'e Ar\'abigo \par}
+\rule{14cm}{0.1mm}
+\vspace{3cm}
+
+{\itshape\Large Proyecto Final Estad\'istica Bayesiana \par}
+
+\vfill
+{\Large Autores: \par}
+{\Large Agustín Miguel Vanessa \par}
+{\Large González Eslava Rodrigo \par}
+{\Large Reyes González Belén \par}
+{\Large Varela López Ana Karen \par}
+\vfill
+{\Large 31 de Enero de 2021 \par}
+\end{titlepage}
+
+\tableofcontents
+\clearpage
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tseries)
+library(ggplot2)
+library(rugarch)
+library(nortest)
+library(dplyr)
+library(FinTS)
+library(fGarch)
+library(stats)
+library(forecast)
+library(PerformanceAnalytics)
+library(moments)
+library(gridExtra)
+library(dlm)
+library(timeSeries)
+library(rjags)
+library(coda)
+library(lmtest)
+library(astsa)
+```
+
+# Introducción
+
+El café es el producto tropical más comercializado a nivel mundial, particularmente el café arábica o arábigo (proveniente de la especie de árbol *Coffea Arabica*) representa alrededor del 70% de la producción total de café. Esta especie es originaria de Etiopía, aunque actualmente, debido a sus condiciones de cultivo tales como la altura y la temperatura requeridas, este tipo de café es producido mayoritariamente en el centro y en el sur del continente americano.
+
+Por otro lado, se entiende por commodity a un producto o bien por el que existe una demanda en el mercado, generalmente al hacer referencia a dicho término se entiende que se habla de materias primas. El café es uno de los diversos productos que puede comercializarse a través del mercado de commodities y pertenece a aquellos de tipo *soft*.
+
+En este trabajo se pretende modelar los precios mensuales del café arábica dentro del mercado de commodities, estos precios fueron obtenidos de los datos publicados por el Fondo Monetario Internacional en la sección *Primary Commodity Price System*
+y datan de 1990 hasta el 2020. 
+
+# Análisis Descriptivo
+
+```{r, include=FALSE}
+data <- read.csv('Coffee.csv', sep=';')
+head(data)
+cafe <- data[,2]
+cafe <- ts(cafe, frequency = 12, start = c(1990,1), end = c(2020,11))
+# ?Valores faltantes?
+table(is.na(cafe))
+```
+
+La base de datos a analizar se compone únicamente de dos columnas: fecha y precios.
+
+- **Fecha**: Fecha de registro del precio, mensual del 01/1990 al 11/2020.
+
+- **Precios**: Precios registrados en USD por cada 100 libras de café.
+
+Así mismo, la base no presenta datos faltantes por lo que no fue necesario realizar la imputación de datos.
+
+A continuación se muestran los parámetros estadísticos de los precios del café.
+
+```{r, echo=FALSE, fig.align="center"}
+summary(cafe)
+```
+
+Como puede observarse, la media (130.11) es ligeramente mayor a la mediana (128.44), sin embargo ambos valores son cercanos. Por otro lado, los valores mínimo (52.02) y máximo (302.71) se alejan mucho de la mediana, y los cuartiles 1 y 3 son muy distantes entre sí, lo que puede ser indicio de una distribución con colas pesadas.
+
+```{r out.width = "70%", echo=FALSE, fig.align='center'}
+par(cex = 0.9)
+kurtosis_cafe <- kurtosis(cafe)
+skewness_cafe <- skewness(cafe)
+hist(cafe, breaks =20, main = "Histograma de los precios", probability= T, col = "#528792", 
+     border ="white", ylab = "Probabilidad", xlab= "Precio (USD)")
+lines(density(cafe), col = "#CACACA", lwd = 2)
+legend('topright', c('Curtosis: 3.5', 'Asimetría: 0.73'))
+```
+
+Al observar el histograma de precios se puede notar que los datos presentan un sesgo positivo, es decir, la mayoría de los datos están a la derecha de la media, más aún, el 86.8% de los precios se ubican por debajo de los 180 USD, tal como lo muestra la asimetría positiva. Por otro lado, la kurtosis indica que la distribución es leptocúrtica, es decir, existe una alta concentración de los datos alrededor de la media.
+
+```{r out.width = "70%", echo=FALSE, fig.align='center'}
+par(cex = 0.9)
+plot(cafe, main = "Precios mensuales del café 1990-2020", col= "#6CB4AB", ylab = "Precio (USD)", xlab= "Año", lwd = 2)
+```
+
+A través de la serie de tiempo se puede observar que la tendencia aumenta ligeramente a lo largo del tiempo exceptuando el periodo del 2000 al 2004, años en los que sucedió la crisis del café. Así mismo la varianza parece aumentar del año 2000 al 2010, sin embargo el resto del tiempo no está bien definida, principalmente por las abruptas subidas en los precios en 1994, 1997 y 2013. Por otro lado, debido al aumento y disminucipon de la varianza, es difícil determinar si existen ciclos a lo largo de cada año, por lo que, para poder determinar su existencia o no, se utilizará un boxplot cíclico.
+
+```{r out.width = "70%", echo=FALSE, fig.align='center'}
+par(cex = 0.8)
+boxplot(cafe~cycle(cafe), names = month.abb, col ="#B2D6A9", 
+        main="Precios del cafe de acuerdo al mes", xlab = "Mes", ylab = "Precio")
+```
+
+Como puede notarse, no existe un ciclo definido por año, únicamente podrán esperarse ligeros ciclos a lo largo del año, sin embargo en este caso visualmente no se pueden determinar con precisión. Lo que sí se puede observar es la presencia de datos atípicos durante casi todos los meses del año, estos datos pueden coincidir con las abruptas subidas y los picos que se observaron en la serie de tiempo en los años de 1995, 1997 y 2013, durante los cuales la disminución de producción del café derivada del cambio climático en Brasil produjo un aumento en los mercados en el precio del café. 
+
+# Descomposición de la serie de tiempo
+
+Con el fin de determinar el modelo más adecuado para la serie de tiempo se procederá a analizar cada una de sus componentes: tendencia, ciclos estacionales y la parte aleatoria. Para lo anterior se utilizó el método de descomposición multiplicativo.
+
+Analizando cada componente se puede observar que se tiene una tendencia alcista entre 1993 y 1995, posteriormente un comportamiento bajista de 1997 a 2003, la tendencia vuelve a ser creciente entre el 2000 y el 2010, mientras que después de este año es decreciente. Por otra parte, a diferencia de lo que se observaba con el boxplot cíclico, la descomposición muestra la presencia de ciclos estacionales de forma anual.
+
+```{r, echo=FALSE, fig.height=2.7,fig.width=8, fig.align='center'}
+cafe_decomp<-decompose(cafe, type= "multiplicative")
+trend <- cafe_decomp$trend
+seasonal <- cafe_decomp$seasonal
+season <- ts(seasonal[1:60], frequency = 12, start = c(1990,1), end = c(1994,12))
+par(mfrow=c(1,2), cex = 0.7)
+plot(trend, main = "Tendencia", col= "#EBB00B", ylab = " ", xlab= "Año", lwd =2)
+plot(season, main = "Ciclos estacionales", col= "#EF7E16", ylab = " ", xlab= "Año", lwd =2)
+```
+
+El gráfico siguiente muestra la reconstrucción de la serie a través de sus componentes en comparación con los datos originales, como puede observarse, a grandes rasgos el comportamiento se asemeja y se obtiene una buena estimación, sin embargo los puntos más extremos de la serie no se alcanzan en su totalidad.
+
+```{r out.width = "70%", echo=FALSE, fig.align='center'}
+par(cex = 0.9)
+ts.plot(cbind(cafe, trend, seasonal*trend), col=c("#BFBFBF", "#D1A4C2","#AF4551"), lty=c(1,1,2), lwd =c(1,2,2), 
+        main ="Precios del cafe (tendencia y estacionalidad)", xlab = "Tiempo", ylab = "Precios")
+legend("topleft", c("Serie original","Tendencia", "Ciclos estacionales"), col=c("#BFBFBF", "#C29CBE","#CD4864"), lty=c(1,1,2), 
+      lwd =c(1,2,2), cex=.7, bty = "n")
+```
+
+# Ajuste del modelo 
+
+Hasta ahora puede suponerse que la serie no es estacionaria, sin embargo, para confirmarlo formalmente se llevarán a cabo las pruebas de normalidad (Dickey-Fuller, de Phillips-Perron y de Kwiatkowski-Phillips-Schmidt-Shin), de homocedasticidad (Breusch-Pagan) y de media cero (t.test). Obteniendo en ambos casos, que la serie de tiempo no es estacionaria.
+
+```{r, include = FALSE}
+  adf.test(cafe)
+  pp.test(cafe)
+  kpss.test(cafe)
+  t.test(cafe)
+```
+
+p-values obtenidos
+
+- Dickey-Fuller Test: 0.151 
+
+- Phillips-Perron Test: 0.2167
+
+- KPSS Test: 0.01
+
+- BP Test: 0.006
+
+- One Sample t-test: 2.2e-16
+
+
+```{r, include = FALSE}
+# Obtenemos el número aproximado de diferencias a realizarle a la serie
+nsdiffs(cafe) 
+ndiffs(cafe)
+
+cafe_dif <- diff(cafe)
+cafe_dif2 <- diff(cafe_dif, lag = 12)
+
+# Pruebas de estacionariedad 
+adf.test(cafe_dif2)
+pp.test(cafe_dif2)
+kpss.test(cafe_dif2)
+
+x_dif2 <- 1:length(cafe_dif2)
+y_dif2 <- as.numeric(cafe_dif2)
+bptest(y_dif2~x_dif2)
+t.test(cafe_dif2)
+```
+
+Con el fin de hacer estacionaria la serie se le aplicó una diferencia para quitarle la tendencia y otra para la estacionalidad. A continuación se muestran los diagramas de autocorrelación (ACF) y autocorrelación parcial (PACF) de la serie con y sin diferencias, así como los resultados de las pruebas estadísticas que determinan que la serie es estacionaria.
+
+```{r out.width = "100%", echo=FALSE, fig.align='center'}
+# Obtenemos el número aproximado de diferencias a realizarle a la serie
+par(mfrow=c(2,2), cex = 0.7)
+
+acf(cafe, lag.max = 100, main = 'ACF Cafe', ylab = '', xlab = '')
+pacf(cafe, lag.max = 100,  main = 'PACF Cafe', ylab = '', xlab = '')
+
+acf(cafe_dif2, lag.max = 100,  main = 'ACF Cafe con diferencia', ylab = '')
+pacf(cafe_dif2, lag.max = 100, main = 'PACF Cafe con diferencia', ylab = '')
+```
+
+p-values obtenidos
+
+- Dickey-Fuller Test: 0.01 
+
+- Phillips-Perron Test: 0.01
+
+- KPSS Test: 0.10
+
+- BP Test: 0.1527
+
+- One Sample t-test: 0.9873
+
+## Modelo sin transformación
+
+Como en el diagrama de correlación simple (ACF) existe un valor que se sale de las bandas de confianza, y en el diagrama de correlación parcial existen aproximadamente 2 valores que se salen de las bandas de confianza, entonces se podría pensar en la existencia de un coeficiente 1 para la parte de promedios móviles, de un 2 para la parte autoregresiva y dado que se hizo una diferencia para quitar la tendencia y otra para quitar los ciclos, el primer modelo a considerar es un $SARIMA(1,1,2)(0,1,0)[12]$
+
+```{r, include=FALSE}
+auto.arima(cafe)
+auto.arima(cafe_dif2)
+```
+
+## Modelo con BoxCox
+
+```{r, include = FALSE}
+lambda <- BoxCox.lambda(cafe)
+
+cafe_boxcox <- cafe^lambda
+nsdiffs(cafe_boxcox) 
+ndiffs(cafe_boxcox)
+
+cafe_boxcox_dif <- diff(cafe_boxcox)
+cafe_boxcox_dif2 <- diff(cafe_boxcox_dif, lag = 12)
+
+```
+
+El método arroja una $\lambda = -0.6$ por lo que, aplicando la transformación y efectuando dos diferencias para quitar la tendencia de la serie y los ciclos estacionales, se observan los siguientes correlogramas:
+
+```{r, echo=FALSE, fig.height=2.7,fig.width=8, fig.align='center'}
+# Obtenemos el número aproximado de diferencias a realizarle a la serie
+par(mfrow=c(1,2), cex = 0.7)
+
+acf(cafe_boxcox_dif2, lag.max = 100,  main = 'ACF Cafe BoxCox', ylab = '')
+pacf(cafe_boxcox_dif2, lag.max = 100, main = 'PACF Cafe BoxCox', ylab = '')
+```
+
+De donde, debido a que existen dos valores en PACF que se salen de las bandas se plantea inicialmente un $AR(2)$, así mismo, existe una valor que se sale de las bandas en el ACF. Considerando lo anterior y las diferencias realizadas a los datos se propone el modelo *SARIMA(2,1,1)(0,1,0)[52]*
+
+Por otro lado, el comando *auto.arima()* arroja el modelo *SARIMA(0,1,1)(2,1,0)[12]*, mismo que se tomará en cuenta.
+
+```{r, include=FALSE}
+auto.arima(cafe_boxcox_dif2)
+```
+
+# Comparación de modelos
+Evaluando los modelos propuestos con aquellos que resultan más similares entre sí se obtienen los siguientes resultados:
+
+```{r out.width='50%', include = FALSE}
+sarima_1 <- arima(cafe,order=c(1,1,2), seasonal = list(order=c(0,1,0),period = 12))
+sarima_2 <- arima(cafe,order=c(2,1,0), seasonal = list(order=c(2,1,0),period = 12))
+sarima_3 <- arima(cafe,order=c(0,1,2), seasonal = list(order=c(1,1,0),period = 12))
+sarima_4 <- arima(cafe,order=c(0,1,2), seasonal = list(order=c(0,1,0),period = 12))
+sarima_5 <- arima(cafe,order=c(0,1,2), seasonal = list(order=c(0,1,1),period = 12))
+BC_sarima1 <- arima(cafe_boxcox,order=c(2,1,1), seasonal = list(order=c(0,1,0),period = 12))
+BC_sarima2 <- arima(cafe_boxcox,order=c(0,1,1), seasonal = list(order=c(2,1,0),period = 12))
+
+# ------------ sarima_1 ------------
+summary(sarima_1)
+confint(sarima_1)
+BIC(sarima_1)
+AIC(sarima_1)
+
+# Validacion Supuestos
+
+#Normalidad
+ad.test(sarima_1$residuals)
+shapiro.test(sarima_1$residuals)
+qqnorm(sarima_1$residuals)
+qqline(sarima_1$residuals)
+#Homocedasticidad
+x_1 <- 1:length(sarima_1$residuals)
+y_1 <- as.numeric(sarima_1$residuals)
+bptest(y_1~x_1)
+plot(sarima_1$residuals)
+#Media Cero
+t.test(sarima_1$residuals)
+#No correlación
+checkresiduals(sarima_1$residuals)
+tsdiag(sarima_1)
+
+# ------------ sarima_2 ------------
+summary(sarima_2)
+confint(sarima_2)
+BIC(sarima_2)
+AIC(sarima_2)
+
+# Validacion Supuestos
+
+#Normalidad
+ad.test(sarima_2$residuals)
+shapiro.test(sarima_2$residuals)
+qqnorm(sarima_2$residuals)
+qqline(sarima_2$residuals)
+#Homocedasticidad
+x_2 <- 1:length(sarima_2$residuals)
+y_2 <- as.numeric(sarima_2$residuals)
+bptest(y_2~x_2)
+plot(sarima_2$residuals)
+#Media Cero
+t.test(sarima_2$residuals)
+#No correlación
+checkresiduals(sarima_2$residuals)
+tsdiag(sarima_2)
+
+# ------------ sarima_3 ------------
+summary(sarima_3)
+confint(sarima_3)
+BIC(sarima_3)
+AIC(sarima_3)
+
+# Validacion Supuestos
+
+#Normalidad
+ad.test(sarima_3$residuals)
+shapiro.test(sarima_3$residuals)
+qqnorm(sarima_3$residuals)
+qqline(sarima_3$residuals)
+#Homocedasticidad
+x_3 <- 1:length(sarima_3$residuals)
+y_3 <- as.numeric(sarima_3$residuals)
+bptest(y_3~x_3)
+plot(sarima_3$residuals)
+#Media Cero
+t.test(sarima_3$residuals)
+#No correlación
+checkresiduals(sarima_3$residuals)
+tsdiag(sarima_3)
+
+# ------------ sarima_4 ------------
+summary(sarima_4)
+confint(sarima_4)
+BIC(sarima_4)
+AIC(sarima_4)
+
+# Validacion Supuestos
+
+#Normalidad
+ad.test(sarima_4$residuals)
+shapiro.test(sarima_4$residuals)
+qqnorm(sarima_4$residuals)
+qqline(sarima_4$residuals)
+#Homocedasticidad
+x_4 <- 1:length(sarima_4$residuals)
+y_4 <- as.numeric(sarima_4$residuals)
+bptest(y_4~x_4)
+plot(sarima_4$residuals)
+#Media Cero
+t.test(sarima_4$residuals)
+#No correlación
+checkresiduals(sarima_4$residuals)
+tsdiag(sarima_4)
+
+# ------------ sarima_5 ------------
+summary(sarima_5)
+confint(sarima_5)
+BIC(sarima_5)
+AIC(sarima_5)
+
+# Validacion Supuestos
+
+#Normalidad
+ad.test(sarima_5$residuals)
+shapiro.test(sarima_5$residuals)
+qqnorm(sarima_5$residuals)
+qqline(sarima_5$residuals)
+#Homocedasticidad
+x_5 <- 1:length(sarima_5$residuals)
+y_5 <- as.numeric(sarima_5$residuals)
+bptest(y_5~x_5)
+plot(sarima_5$residuals)
+#Media Cero
+t.test(sarima_5$residuals)
+#No correlación
+checkresiduals(sarima_5$residuals)
+tsdiag(sarima_5)
+
+# ------------ BC_sarima1 ------------
+summary(BC_sarima1)
+confint(BC_sarima1)
+BIC(BC_sarima1)
+AIC(BC_sarima1)
+
+# Validacion Supuestos
+
+#Normalidad
+ad.test(BC_sarima1$residuals)
+shapiro.test(BC_sarima1$residuals)
+qqnorm(BC_sarima1$residuals)
+qqline(BC_sarima1$residuals)
+#Homocedasticidad
+BCx_1 <- 1:length(BC_sarima1$residuals)
+BCy_1 <- as.numeric(BC_sarima1$residuals)
+bptest(BCy_1~BCx_1)
+plot(BC_sarima1$residuals)
+#Media Cero
+t.test(BC_sarima1$residuals)
+#No correlación
+checkresiduals(BC_sarima1$residuals)
+tsdiag(BC_sarima1)
+
+# ------------ BC_sarima2 ------------
+summary(BC_sarima2)
+confint(BC_sarima2)
+BIC(BC_sarima2)
+AIC(BC_sarima2)
+
+# Validacion Supuestos
+
+#Normalidad
+ad.test(BC_sarima2$residuals)
+shapiro.test(BC_sarima2$residuals)
+qqnorm(BC_sarima2$residuals)
+qqline(BC_sarima2$residuals)
+#Homocedasticidad
+BCx_2 <- 1:length(BC_sarima2$residuals)
+BCy_2 <- as.numeric(BC_sarima2$residuals)
+bptest(BCy_2~BCx_2)
+plot(BC_sarima2$residuals)
+#Media Cero
+t.test(BC_sarima2$residuals)
+#No correlación
+checkresiduals(BC_sarima2$residuals)
+tsdiag(BC_sarima2)
+```
+
+![](tabla1.jpg){}
+
+Como puede observarse, en ninguno de los casos propuestos se cumple el supuesto de normalidad, lo anterior puede deberse a los datos atípicos observados en ciertos años que provocan que la distribución tenga colas pesadas y por ende, que no se ajuste a una distribución normal. Por otro lado, en los casos en lo que se trabajó con la transformación sugerida por el método de BoxCox la varianza tiende a diverger debido a la construcción de la propia transformación. 
+
+Considerando lo anterior, se concluyó que los modelos más adecuados para la serie de tiempo son un *SARIMA(0,1,2)(0,1,1)[12]* y un  *SARIMA(0,1,2)(0,1,0)[12]*, en los que los parámetros de ambos modelos resultan significativos, además de cumplir con los supuestos de homocedasticidad, media cero, y no autocorrelación. Sin embargo el AIC y el BIC del *SARIMA(0,1,2)(0,1,1)[12]* son menores por lo que este será el modelo a trabajar.
+
+La siguiente gráfica muestra la serie original en comparación al modelo propuesto, en donde se puede observar que efectivamente el modelo se ajusta al comportamiento de los datos originales. 
+
+```{r out.width = "70%", echo = FALSE, fig.align='center'}
+par(cex = 0.9)
+ajuste_1 <- cafe-residuals(sarima_5)
+
+ts.plot(cafe, main = 'SARIMA(0,1,2)(0,1,1)[12]', xlab = 'Año', ylab = 'Precio', col = '#08829E', lwd =1)
+points(ajuste_1, type = 'l', col = '#A1CAD3', lwd =1)
+
+```
+
+Por tanto, el modelo es tal que:
+$$X_t = \theta_2(L) \Theta_1(L^{12}) \epsilon_t$$
+En donde:
+\begin{align*}
+X_t &= (1-L)(1-L^{12})Y_t\\
+&= (1-L-L^{12}-L^{13})Y_t\\
+&= Y_t - Y_{t-1} - Y_{t-12} + Y_{t-13}
+\end{align*}
+
+Sustituyendo:
+\begin{align*}
+Y_t &= Y_{t-1} + Y_{t-12} - Y_{t-13} + (1-\theta_1 L - \theta_2 L^2)(1- \Theta_1 L^12) \epsilon_t\\
+&= Y_{t-1} + Y_{t-12} - Y_{t-13} + (1-\Theta_1 L^{12} - \theta_1 L +\theta_1 \Theta_1 L^{13} - \theta_2 L^2 + \theta_2 \Theta_1 L^{14}) \epsilon_t\\
+&= Y_{t-1} + Y_{t-12} - Y_{t-13} + \epsilon_{t} -\Theta_1 \epsilon_{t-12} - \theta_1 \epsilon_{t-1} +\theta_1 \Theta_1 \epsilon_{t-13} - \theta_2 \epsilon_{t-2} + \theta_2 \Theta_1 \epsilon_{t-14}\\
+\end{align*}
+
+$$\therefore Y_t = Y_{t-1} + Y_{t-12} - Y_{t-13} + \epsilon_{t} - \theta_1 \epsilon_{t-1} - \theta_2 \epsilon_{t-2} -\Theta_1( \epsilon_{t-12} - \theta_1 \epsilon_{t-13} - \theta_2 \epsilon_{t-14})$$
+
+# Predicción
+
+A continuación se muestran las predicciones obtenidas usando el modelo *SARIMA(0,1,2)(0,1,1)[12]*. Se predijeron 12 datos después de noviembre de 2020, equivalente a un año. 
+
+```{r out.width = "70%", echo=FALSE, fig.align='center'}
+par(cex = 0.9)
+plot(forecast(sarima_5,h=12), include = 60, col = c('#4D8C99','#357887'), shadecols= c('#E7EAEA','#BEDADF'), ylab='Precio', xlab = 'Año', main = "Predicción ARIMA(0,1,2)(0,1,1)[12]", lwd =2)
+```
+
+Como se puede observar, la predicción obtenida no se ajusta de forma fidedigna al comportamiento de la serie original y las bandas de confianza son muy amplias, lo cual puede deberse a que el comportamiento de la serie es altamente variable a lo largo de tiempo y a que no se cumplió el supuesto de normalidad, por lo que, al ser calculadas las bandas de confianza con cuantiles de una normal resultan poco precisas. 
+
+Con el fin de optimizar la predicción y los parámetros del modelo obtenidos bajo el enfoque frecuentista se procederá a realizar la implementación del modelo en JAGS bajo un enfoque bayesiano. 
+
+# Ajuste del modelo bayesiano 
+
+Ahora que se ha determinado el modelo para la serie de tiempo de los precios del café, se implementará el ajuste bayesiano.
+
+## Código en JAGS
+
+```{r, warning=FALSE}
+n <- length(cafe)
+data <- list(
+  y = as.integer(cafe),
+  n = length(cafe)
+)
+# Definimos los valores iniciales para los parámetros del modelo
+inits <- function(){ list(
+  
+  theta_1 = rnorm(1,0,0.1),
+  theta_2 = rnorm(1,0,0.1),
+  Theta_1 = rnorm(1,0,0.1),
+  tau = runif(1,0,0.001),
+  tau_z = runif(1,0,0.001))
+  
+}
+
+params <- c('theta_1', 'theta_2', 'Theta_1', 'sigma2','sigma2z','y.pred')
+
+modelo_SARIMA <-  "model{
+
+  for(i in 1:n){
+    z[i] ~ dnorm(0,1/sigma2z)
+  }
+  
+  for(i in 15:n){
+    y[i]~ dnorm(f[i],1/sigma2)
+    f[i] <- alpha + y[i-1]+y[i-12]-y[i-13]+z[i]-theta_1*z[i-1]-theta_2*z[i-2]-
+            Theta_1*(z[i-12]-theta_1*z[i-13]-theta_2*z[i-14])
+  }
+  
+  #Predicciones
+  for(i in 15:(12+15)){
+               y.pred[i] ~dnorm(f.pred[i],1/sigma2)
+               f.pred[i] <- alpha + y.pred[i-1]+y.pred[i-12]-y.pred[i-13] 
+               + z.pred[i]- theta_1*z.pred[i-1]-theta_2*z.pred[i-2] - 
+               Theta_1*(z.pred[i-12]-theta_1*z.pred[i-13]-theta_2*z.pred[i-14])
+  }
+  
+  for(i in 15:(12+15)){
+              z.pred[i] ~ dnorm(0,1/sigma2z)
+  }
+  
+  for(i in 1:14){
+              z.pred[i] <- z[n-14+i] 
+              y.pred[i] <- y[n-14+i]
+  }
+  
+  
+  for(i in 1:14){
+    y[i]~ dnorm(f[i],1/sigma2)
+    f[i] <- alpha -theta_1*z[i]-theta_2*z[i]-
+            Theta_1*(z[i]-theta_1*z[i]-theta_2*z[i])
+  }
+
+# Prior informativas
+  alpha ~ dnorm(0,0.01)
+  theta_1 ~ dnorm(0,1)
+  theta_2 ~ dnorm(0,1)
+  Theta_1 ~ dnorm(0,1)
+  tau ~ dunif(0.00001,0.001)
+  tau_z ~ dunif(0.00001,0.001)
+  sigma2 <- 1/tau
+  sigma2z <- 1/tau_z
+  
+}"
+```
+
+Con el fin de asegurar la convergencia, se utilizaron 10,000 simulaciones y un periodo de quemado de 15,000 simulaciones,así mismo, se utilizaron distribuciones a priori convenientes, particularmente para los casos de $\theta_1 \text{ y } \theta_2$ en los cuales se utilizó una distribución uniforme con el fin de hacer converger a los parámetros,  las distribuciones finales obtenidas se muestran a continuación.
+
+```{r, include = FALSE}
+set.seed(100)
+
+fit <- jags.model(textConnection(modelo_SARIMA), data, inits = inits, n.chains=3)
+
+update(fit,5000)
+sample.sarima <- coda.samples(fit,params,n.iter = 5000, thin = 1)
+#plot(sample.sarima)
+  
+summary(sample.sarima)
+
+#gelman.diag(sample.sarima, confidence = 0.95, transform = F)
+#gelman.plot(sample.sarima)
+```
+
+Con el fin de determinar el modelo más adecuado para la serie de tiempo se compararán las estimaciones de los parámetros así como las predicciones que cada uno arrojó. 
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=10cm]{tabla2.jpg}
+\end{figure}
+
+Como puede observarse,los tres parámetros de interés ($MA_1$, $MA_2$, $SMA_1$) resultan significativos para ambos casos, sin embargo, los valores estimados varían con respecto a las estimaciones empíricas encontradas en JAGS. Por este motivo se analizarán las predicciones de acuerdo a este modelo para determinar si éstas la últimas estimaciones obtenidas resultan acertadas.
+
+## Prediciones
+
+Como puede observarse en el gráfico izquierdo, en este caso las predicciones parecen tener un comportamiento similar al de la serie original, además, los precios proyectados para el siguiente año fluctuan alrededor de la media de los precios en los últimos cuatro años. Pareciera que la predicción es buena, sin embargo, los intervalos al 95% de confianza son muy amplios, alcanzado precio negativos.
+
+No obstante, podríamos construir un intervalo de confianza de forma determinista donde se permita a lo más dos veces la desviación estándar. En el gáfico derecho se observa la predicción a un  año con el intervalo construido como $(\mu \pm 2\sigma)$.
+
+```{r, echo=FALSE, fig.height=3, fig.width=8, fig.align='center'}
+par(cex = 0.8)
+### Grafica de predicciones 
+aux<-summary(sample.sarima)
+pred = aux$statistics[19:30,1]
+sd.error= aux$statistics[19:30,3]
+cuantil = aux$quantiles[19:30,c(1,5)]
+
+#Intervalos de "confianza" deterministas de 2 errores estandar (Naive SD) : 
+lim_sup = pred[1:12] + 2*sd.error[1:12]
+lim_inf = pred[1:12] - 2*sd.error[1:12]
+
+x <- seq.Date(as.Date('2016-01-01'),as.Date('2020-11-01'), by = 'month')
+x_1 <- seq.Date(as.Date('2020-12-01'),as.Date('2021-11-01'), by = 'month')
+upper <- cuantil[,2]
+lower <- cuantil[,1]
+e1<-ggplot()+
+  geom_line(aes(x = x, y = cafe[313:371], color = "Datos"), size = 0.8)+
+  geom_ribbon(aes(x = x_1, ymax =upper, ymin = lower, fill = '.'), alpha = 0.4)+
+  geom_line(aes(x = x_1, y = pred, color = "Predicción"), size = 0.8)+
+  scale_fill_manual(values =c('#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef'), name = 'Bandas')+
+  scale_color_manual(values = c('#51B1D4', '#00779B'), name = 'Serie')+
+  labs(y = 'Precio', x = 'Año')+
+  ggtitle('Predicción de precios del café\n durante el siguiente año') +  theme_test() +
+  theme(plot.title = element_text(size= 12, hjust = 0.5),
+        axis.title.x = element_text(size = 10, color = 'grey20'),
+        axis.title.y = element_text(size = 10, color = 'grey20'))  +
+  theme(legend.position = "none")
+##################
+e2<-ggplot()+
+  geom_line(aes(x = x, y = cafe[313:371], color = "Datos"), size = 0.8)+
+  geom_ribbon(aes(x = x_1, ymax =lim_sup, ymin = lim_inf, fill = '.'), alpha = 0.6)+
+  geom_line(aes(x = x_1, y = pred, color = "Predicción"), size = 0.8)+
+  scale_fill_manual(values =c('#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef'), name = 'Bandas')+
+  scale_color_manual(values = c('#51B1D4', '#00779B'), name = 'Serie')+
+  labs(y = 'Precio', x = 'Año')+
+  ggtitle('Predicción de precios del café\n durante el siguiente año') +  theme_test() +
+  theme(plot.title = element_text(size= 11, hjust = 0.5),
+        axis.title.x = element_text(size = 10, color = 'grey20'),
+        axis.title.y = element_text(size = 10, color = 'grey20'))  +
+  theme(legend.position = "none")
+
+grid.arrange(e1, e2, ncol=2)
+```
+
+Si bien la predicción parece acertada, el modelo no cumple con el supuesto de residuales gaussianos. Así mismo, dado que los modelos basados en promedios móviles están parcialmente determinados por el ruido blanco 'n' pasos atrás dependiendo de su coeficiente, al simular en JAGS este comportamiento, particularmente al simular el ruido blanco, se tiene un alto riesgo de divergencia dependiendo de las distribuciones a prioris definidas, lo que ocasiona que los parámetros del modelo no sean convengentes. 
+
+Por el motivo anterior se necesitan introducir  distribuciones a prioris lo menos informativas posible (como fue este caso al introducir una uniforme), por lo cual se concluye que JAGS no resulta ser un buen optimizador de modelos de promedios móviles. 
+
+Debido a que los resultados obtenidos con la familia de modelos ARIMA no fueron acertados, se aplicará un enfoque de modelos dinámicos lineales. 
+
+# Ajuste con Modelos Dinámicos Lineales
+
+Dado que la serie de tiempo a analizar se compone por los precios de mercado, esta serie tiende a ser poco estable, sin ciclos completamente definidos y con una varianza no establecida a lo largo del tiempo, debido a lo cual el tipo de modelo que se ajuste a la serie necesita ser más flexible que aquellos pertenecientes a la gama de modelos $SARIMA$. 
+
+Los modelos dinámicos lineales resultan una buena opción para el tipo de serie que se pretende modelar, ya que no asumen un patrón regular de la serie ni estabilidad de la misma. 
+
+## Ajuste con JAGS
+
+En primer lugar se implementó el código en  JAGS a través de la definición teórica de un modelo dinámico, se partió de distribuciones no informativas pero convenientes, particularmente para la distribución de $\tau$ con el fin de asegurar la convergencia.
+
+```{r}
+### Modelo dinamico
+# JAGS
+
+Nnew = 12 ### Numero de predicciones
+n <- length(cafe)
+data <- list(
+  Y = as.integer(cafe),
+  N = length(cafe),
+  Nnew = Nnew
+)
+
+inits <- function(){ list(
+  
+  theta_1 = rnorm(1,0,0.1),
+  theta_2 = rnorm(1,0,0.1),
+  Theta_1 = rnorm(1,0,0.1),
+  tau = runif(1,0,0.001),
+  tau_z = runif(1,0,0.001))
+}
+
+params <- c("sd.q", "sd.r", "mu","phi1","phi2","Ynew")
+
+modelo_DINAMICO <-  "model {  
+   # priors on parameters
+   mu ~ dnorm(0, 0.01); 
+   tau.pro ~ dunif(0.00001,0.001); 
+   sd.q <- 1/sqrt(tau.pro);
+   tau.obs ~ dgamma(0.001,0.001);
+   sd.r <- 1/sqrt(tau.obs); 
+   phi1 ~ dnorm(0,1);
+   phi2 ~ dnorm(0,1);
+### Modelo   
+   X[1] <- mu;
+   X[2] <- mu;
+   predY[1] <- X[1];
+   predY[2] <- X[2];
+   Y[1] ~ dnorm(X[1], tau.obs);
+   Y[2] ~ dnorm(X[2], tau.obs);
+
+   for(i in 3:N) {
+      predX[i] <- phi1*X[i-1]+phi2*X[i-2]; 
+      X[i] ~ dnorm(predX[i],tau.pro); # Process variation
+      predY[i] <- X[i];
+      Y[i] ~ dnorm(X[i], tau.obs); # Observation variation
+   }
+### Prediccion
+   predXnew[1] <- phi1*X[N]+phi2*X[N-1]; 
+   predXnew[2] <- phi1*Xnew[2-1]+phi2*X[N]; 
+   for(i in 3:Nnew) {
+      predXnew[i] <- phi1*Xnew[i-1]+phi2*Xnew[i-2]; 
+   }
+   for(i in 1:Nnew) {
+      Xnew[i] ~ dnorm(predXnew[i],tau.pro); # Process variation
+      predYnew[i] <- Xnew[i];
+      Ynew[i] ~ dnorm(Xnew[i], tau.obs); # Observation variation
+   }
+}  
+"
+```
+
+Se realizaron 5,000 iteraciones y un periodo de quemado de 10,000, obteniendo los siguientes valores estimados, resultando todos significativos.
+
+- $\mu$: 75.691125
+
+- $\phi_1$: 1.071264
+
+- $phi_2$: -0.071264
+
+- $\sigma_q$: 31.721028
+
+- $\sigma_r$: 3.150717
+
+
+```{r, include =FALSE}
+set.seed(100)
+
+fit <- jags.model(textConnection(modelo_DINAMICO), data, inits = inits, n.chains=3)
+
+update(fit,10000)
+sample.dinamico <- coda.samples(fit,params,n.iter = 5000, thin = 1)
+#plot(sample.dinamico)
+  
+summary(sample.dinamico)
+
+gelman.diag(sample.dinamico, confidence = 0.95, transform = F)
+gelman.plot(sample.dinamico)
+```
+
+### Predicciones MDL JAGS
+
+Así mismo, las predicciones a través de este camino fueron las siguientes:
+
+```{r, include=FALSE}
+N = length(cafe)
+cafe[(N-Nnew):N]
+(cafepred = summary(sample.dinamico)$statistics[1:Nnew,1])
+(cuantil = summary(sample.dinamico)$quantiles[1:Nnew,c(1,5)])
+```
+
+```{r out.width = "65%", echo=FALSE, fig.align='center'}
+x <- seq.Date(as.Date('2016-01-01'),as.Date('2020-11-01'), by = 'month')
+x_1 <- seq.Date(as.Date('2020-12-01'),as.Date('2021-11-01'), by = 'month')
+upper <- cuantil[,2]
+lower <- cuantil[,1]
+ggplot()+
+  geom_line(aes(x = x, y = cafe[313:371], color = "Datos"), size = 0.8)+
+  geom_ribbon(aes(x = x_1, ymax = upper, ymin = lower, fill = '95%'), alpha = 0.5)+
+  geom_line(aes(x = x_1, y = cafepred, color = "Predicción"), size = 0.8)+
+  scale_fill_manual(values =c('#c6dbef','#9ecae1'), name = 'Bandas')+
+  scale_color_manual(values = c('#51B1D4', '#3896B8'), name = 'Serie')+
+  labs(y = 'Precio', x = 'Año')+
+  ggtitle('Predicción Precio del Café DLM (JAGS)') +  theme_test() +
+  theme(plot.title = element_text(size= 12, hjust = 0.5))+
+  theme(legend.position = "none")
+```
+
+La gráfica muestra una ventana reducida de observaciones junto con 12 predicciones equivalentes a un año, como puede observarse, dada la natureleza de JAGS, esta predicción nuevamente tiende a la media, y el intervalo de confianza resulta muy amplio, llegando incluso a tomar valores negativos. 
+
+Debido a la imprecisión de los intervalos de confianza y con el fin de obtener otra predicción se optó por usar la paquetería *dlm* en R.
+
+## Ajuste con la paquetería *dlm*
+
+Para encontrar los parámetros del modelo primero se hizo uso de la optimización de la máxima verosimilitud para hallar las dos varianzas desconocidas. Los resultados obtenidos fueron:
+
+```{r, include =FALSE}
+# Construcción de la función que parametriza las dos varianzas en términos de 
+# la máxima verosimilud
+
+library(dlm)
+# Construcción de la función que parametriza las dos varianzas en términos de 
+# la máxima verosimilud
+
+build <- function(parm){
+  dlmModPoly(order = 1, dV = exp(parm[1]), dW = exp(parm[2]))
+}
+ajuste <- dlmMLE(cafe, rep(0,2), lower=c(1e-6,0), build, hessian = TRUE)
+ajuste$convergence
+unlist(build(ajuste$par))[c('V','W')]
+avar <- solve(ajuste$hessian)
+sqrt(diag(avar))
+
+dlmcafe <- build(ajuste$par)
+cafeFit <- dlmFilter(cafe, dlmcafe)
+```
+
+- Convergencia: 0
+
+- V: 1.000001
+
+- W: 120.023254
+
+- S.E. V: 1.40369248
+
+- S.E. W: 0.07614551
+
+Así mismo, el ajuste del modelo respecto a la serie original se muestra a continuación, en donde se observa que el modelo parece ajustarse al comportamiento real de la serie
+
+```{r out.width = "70%", echo=FALSE, fig.align='center'}
+par(cex = 0.9)
+plot(cafe, col = '#00779B', lwd = 1.5, main = 'Ajuste del modelo', xlab = 'Año', ylab = 'Precio') #ajuste
+lines(dropFirst(dlmBSample(cafeFit)), col = "#51B1D4", type = "o")
+```
+
+Partiendo de este punto se hizo uso de la función *forecast* del modelo para obtener las predicciones a 12 pasos o a un año después del último dato disponible. Esta función realiza iteraciones de posibles comportamientos futuros de la serie, los cuales ofrecen predicciones como las que se muestran en la gráfica.  
+
+```{r, include=FALSE}
+set.seed(120)
+n <- 12
+num <- 100
+y1 <- dlmForecast(cafeFit, nAhead=n,sampleNew=num)
+summary(y1)
+```
+
+Como puede observarse estas iteraciones mantienen el comportamiento histórico de la serie, sin embargo la diferencia entre cada una es muy grande. Lo anterior se debe a que los precios del café han sido altamente variables a lo largo del tiempo, y por tanto podrían tomar cualquiera de estos valores a futuro. Por lo tanto, se trató de proponer un modelo que incorporara cada una de las posibles predicciones a futuro de la serie. 
+
+```{r, fig.width=8, fig.height=2.8, echo = FALSE, fig.align='center'}
+x <- c()
+y<-c()
+for(j in 1:12){
+  for(i in 1:100){
+    x[i]<-y1$newObs[[i]][j,1]
+  }
+  
+  y[j]<-median(x)
+}
+x <- seq.Date(as.Date('2016-01-01'),as.Date('2020-11-01'), by = 'month')
+ x_1 <- seq.Date(as.Date('2020-12-01'),as.Date('2021-11-01'), by = 'month')
+ 
+p1 = ggplot()+
+   geom_line(aes(x =x, y = cafe[313:371], color = "Datos"), size = 0.6)+
+   geom_line(aes(x = x_1, y = y1$newObs[[3]], color = "Estimado"), size = 0.6)+
+   scale_color_manual(values = c('#51B1D4', '#00779B', '#51B1D4'), name = 'Serie')+
+   labs(y = 'Precio', x = 'Año')+
+   ggtitle(' ') +  theme_test() +
+   theme(plot.title = element_text(size= 12, hjust = 0.5),
+         axis.title.x = element_text(size = 10, color = 'grey20'),
+         axis.title.y = element_text(size = 10, color = 'grey20'))+
+  theme(legend.position = "none")
+
+p2 = ggplot()+
+   geom_line(aes(x =x, y = cafe[313:371], color = "Datos"), size = 0.6)+
+   geom_line(aes(x = x_1, y = y1$newObs[[4]], color = "Estimado"), size = 0.6)+
+   scale_color_manual(values = c('#51B1D4', '#00779B', '#51B1D4'), name = 'Serie')+
+   labs(y = 'Precio', x = 'Año')+
+   ggtitle('Ejemplo predicción') +  theme_test() +
+   theme(plot.title = element_text(size= 12, hjust = 0.5),
+         axis.title.x = element_text(size = 10, color = 'grey20'),
+         axis.title.y = element_text(size = 10, color = 'grey20'))+
+  theme(legend.position = "none")
+
+p3 = ggplot()+
+   geom_line(aes(x =x, y = cafe[313:371], color = "Datos"), size = 0.6)+
+   geom_line(aes(x = x_1, y = y1$newObs[[5]], color = "Estimado"), size = 0.6)+
+   scale_color_manual(values = c('#51B1D4', '#00779B', '#51B1D4'), name = 'Serie')+
+   labs(y = 'Precio', x = 'Año')+
+   ggtitle(' ') +  theme_test() +
+   theme(plot.title = element_text(size= 12, hjust = 0.5),
+         axis.title.x = element_text(size = 10, color = 'grey20'),
+         axis.title.y = element_text(size = 10, color = 'grey20'))+
+  theme(legend.position = "none")
+
+grid.arrange(p1, p2, p3, ncol=3)
+
+```
+Para proponer un modelo de predicción, se realizaron 100 iteraciones sobre los datos con la función anteriormente mencionada y se obtuvo su mediana; así mismo, para obtener los intervalos de confianza se "coloreó" el área que abarcaron estas 100 iteraciones. Cabe resaltar que debido a la existencia de datos extremos en la serie y a la sensiblidad de la media ante este tipo de datos se optó por la mediana y no por la media como estadístico de predicción. 
+
+De esta forma, la gráfica siguiente muestra una ventana reducida de la serie (2016-2020) junto con las predicciones del modelo propuesto.
+
+```{r out.width = "65%", echo=FALSE, fig.align='center'}
+x <- c()
+y<-c()
+for(j in 1:12){
+  for(i in 1:100){
+    x[i]<-y1$newObs[[i]][j,1]
+  }
+  
+  y[j]<-median(x)
+}
+x <- seq.Date(as.Date('2016-01-01'),as.Date('2020-11-01'), by = 'month')
+ x_1 <- seq.Date(as.Date('2020-12-01'),as.Date('2021-11-01'), by = 'month')
+ upper <- cuantil[,2]
+ lower <- cuantil[,1]
+ ggplot()+
+   geom_line(aes(x = x, y = cafe[313:371], color = "Datos"), size = 0.8)+
+   geom_ribbon(aes(x = x_1, ymax = y1$newObs[[1]], ymin = y1$newObs[[2]], fill = '.'), alpha = 0.4)+
+   geom_ribbon(aes(x = x_1, ymax = y1$newObs[[3]], ymin = y1$newObs[[4]], fill = '.'), alpha = 0.4)+
+   geom_ribbon(aes(x = x_1, ymax = y1$newObs[[5]], ymin = y1$newObs[[6]], fill = '.'), alpha = 0.4)+
+   geom_ribbon(aes(x = x_1, ymax = y1$newObs[[7]], ymin = y1$newObs[[8]], fill = '.'), alpha = 0.4)+
+   geom_ribbon(aes(x = x_1, ymax = y1$newObs[[9]], ymin = y1$newObs[[10]], fill = '.'), alpha = 0.4)+
+   geom_ribbon(aes(x = x_1, ymax = y1$newObs[[11]], ymin = y1$newObs[[12]], fill  = '.'), alpha = 0.4)+
+   geom_ribbon(aes(x = x_1, ymax = y1$newObs[[13]], ymin = y1$newObs[[14]], fill  = '.'), alpha = 0.4)+
+   geom_line(aes(x = x_1, y = y, color = "Predicción"), size = 0.8)+
+   scale_fill_manual(values =c('#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef'), name = 'Bandas')+
+   scale_color_manual(values = c('#51B1D4', '#00779B'), name = 'Serie')+
+   labs(y = 'Precio', x = 'Año')+
+   ggtitle('Predicción Precio del Café DLM (JAGS)') +  theme_test() +
+   theme(plot.title = element_text(size= 12, hjust = 0.5),
+         axis.title.x = element_text(size = 10, color = 'grey20'),
+         axis.title.y = element_text(size = 10, color = 'grey20'))+
+  theme(legend.position = "none")
+```
+
+Como puede observarse este modelo emular de mejor manera el comportamiento de los datos a través del tiempo, y sobre todo, ofrece una mayor precisión en la ventana correspondiente a los futuros datos esperados, pues por primera vez los intervalos de confianza son más pequeños.
+
+Sin embargo, para comprobar la eficiencia del modelo se optó por dividir la muestra en dos, una muestra de entrenamiento y otra de prueba, esto con el fin de aplicar el modelo sobre los datos de entrenamiento para posteriormente obtener sus predicciones y compararlos con los datos reales de la serie. 
+
+La muestra de entrenamiento abarcó los datos de enero de 1990 a noviembre de 2019 (es decir se extrajo el último dato de la serie), y los parámetros estimados de la varianza fueron los siguientes:
+
+```{r, include=FALSE}
+aux<- cafe[1:359]
+aux2<- cafe[360:371]
+
+build <- function(parm){
+  dlmModPoly(order = 1, dV = exp(parm[1]), dW = exp(parm[2]))
+}
+ajuste <- dlmMLE(aux, rep(0,2), lower=c(1e-6,0), build, hessian = TRUE)
+ajuste$convergence
+unlist(build(ajuste$par))[c('V','W')]
+avar <- solve(ajuste$hessian)
+sqrt(diag(avar))
+
+dlmaux <- build(ajuste$par)
+auxFit <- dlmFilter(aux, dlmaux)
+set.seed(120)
+n <- 12
+num <- 100
+y1 <- dlmForecast(auxFit, nAhead=n,sampleNew=num)
+summary(y1)
+```
+- Convergencia: 0
+
+- V: 1.000001
+
+- W: 120.434201 
+
+- S.E. V: 1.41889542
+
+- S.E. W: 0.07735365
+
+Como puede observarse los parámetros obtenidos con la muestra de entrenamiento fueron muy similares a los obtenidos con los datos completos, lo cual nos habla de la consistencia de nuestro modelo; así mismo, la desviación estándar obtenida y la converegencia no variaron de forma significativa respecto a las anteriores, por lo cual nuestra estimación resulta ser estable. 
+
+Ya que se tiene el modelo obtenido con la muestra de entrenamiento se calculan las predicciones y se comparan con los datos originales de la serie. 
+
+```{r out.width= "65%", echo=FALSE, fig.align='center'}
+x<-c()
+y<-c()
+for(j in 1:n){
+  for(i in 1:num){
+    x[i]<-y1$newObs[[i]][j,1]
+  }
+  
+  y[j]<-median(x)}
+  
+x_3 <- seq.Date(as.Date('2016-01-01'),as.Date('2019-11-01'), by = 'month')
+x_2 <-seq.Date(as.Date('2019-12-01'),as.Date('2020-11-01'), by = 'month')
+
+ggplot()+
+  geom_line(aes(x = x_3, y = cafe[313:359], color = "Serie"), size = 0.8)+
+  geom_ribbon(aes(x = x_2, ymax = y1$newObs[[1]], ymin = y1$newObs[[2]], fill = '.'), alpha = 0.4)+
+  geom_ribbon(aes(x = x_2, ymax = y1$newObs[[3]], ymin = y1$newObs[[4]], fill = '.'), alpha = 0.4)+
+  geom_ribbon(aes(x = x_2, ymax = y1$newObs[[5]], ymin = y1$newObs[[6]], fill = '.'), alpha = 0.4)+
+  geom_ribbon(aes(x = x_2, ymax = y1$newObs[[7]], ymin = y1$newObs[[8]], fill = '.'), alpha = 0.4)+
+  geom_ribbon(aes(x = x_2, ymax = y1$newObs[[9]], ymin = y1$newObs[[10]], fill = '.'), alpha = 0.4)+
+  geom_ribbon(aes(x = x_2, ymax = y1$newObs[[11]], ymin = y1$newObs[[12]], fill  = '.'), alpha = 0.4)+
+  geom_ribbon(aes(x = x_2, ymax = y1$newObs[[13]], ymin = y1$newObs[[14]], fill  = '.'), alpha = 0.4)+
+  geom_line(aes(x = x_2, y = aux2, color = "Estimado"), size = 0.8)+
+  geom_line(aes(x = x_2, y = y, color = "Serie"), size = 0.8)+
+  scale_color_manual(values = c('#51B1D4', '#00779B', '#51B1D4'), name = 'Serie')+
+  scale_fill_manual(values =c('#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef','#c6dbef'), name = 'Bandas')+
+  labs(y = 'Precio', x = 'Año')+
+  ggtitle('Comparación del modelo con la serie original') +  theme_test() +
+  theme(plot.title = element_text(size= 12, hjust = 0.5),
+        axis.title.x = element_text(size = 10, color = 'grey20'),
+        axis.title.y = element_text(size = 10, color = 'grey20'))+
+  theme(legend.position = "none")
+
+```
+
+Como puede observarse el modelo tiene un comportamiento similar al de la serie original pues no sólo mantiene su tendencia y los ciclos que se presentan, además, los intervalos de confianza del modelo contienen a la serie original, lo que ofrece una predicción acertada. 
+
+De esta forma podemos concluir que este último modelo propuesto resulta ser el más conveniente para la serie de tiempo de precios del café, pues explica de forma más realista su comportamiento.
+
+# Conclusiones
+
+Dado que la Estadística Bayesiana incorpora juicios basados en la experiencia encaminados en el análisis los datos, ésta puede captar situaciones en las que la dinámica del mercado muestre cambios importantes, lo que proporciona un buen indicador de las condiciones futuras de éste. En particular cuando se trata de trabajar con series de tiempo hay casos en los que los modelos tradicionales no ofrecen suficiente información sobre los datos, sin embargo existen otros métodos y modelos que se adecúan mejor al comportamiento de este tipos de series. 
+
+En el caso de los precios de café, se puede observar que tal como sucede con las series de precios, su comportamiento parece emular un movimiento browniano, de lo cual derivan algunas de sus características, tales como la ausencia de una varianza establecida, la falta de ciclos determinados y la presencia de una tendencia variable. Debido a lo anterior no fue posible explicar el comportamiento de la serie con la familia de modelos ARIMA, pues éste tipo de modelos suponen un patrón regular de la serie y cierta estabilidad de la misma; y aunque se obtuvo un modelo con el enfoque bayesiano, éste tampoco resultó adecuado porque, tal como se explicó con anteriorridad, JAGS no optimiza los coeficientes de promedios móviles (MA) debido a la dependencia de etsos modelos con el ruido blanco. 
+
+Fue por estas razones que, dada la naturaleza de los datos, se implementó un modelo de la familia de modelos dinámicos lineales, puesto que estos resultan ser más flexibles y por tanto mejores para explicar el comportamiento de los precios. Obteniendo así un mejor enfoque a través de la mediana de los posibles resultados futuros de la serie y no a través de la media como se hacía con los modelos anteriores. 
+
+
+
